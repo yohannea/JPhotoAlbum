@@ -61,6 +61,8 @@ import com.drew.metadata.exif.ExifDirectory;
 public class JPhotoFrame extends JFrame
     implements ListSelectionListener, ActionListener {
 
+    public final int A_SLIDESHOW_INTERVAL = 5000;
+    public final int A_FSLIDESHOW_INTERVAL = 1000;
     public static String FILE_EXT = ".jph";
     public static String APP_NAME = "JPhotoAlbum";
     public static String FRAME_X = "frame_x";
@@ -246,6 +248,252 @@ public class JPhotoFrame extends JFrame
         */
     }
 
+    private void newOrOpen(String cmd)
+    {
+        if (confirmedSave()!=JOptionPane.CANCEL_OPTION) {
+            photos = new JPhotoCollection();
+            list.setPhotoModel(photos);
+            albumFileName = null;
+            editingPhoto = null;
+            if (cmd.equals(JPhotoMenu.A_OPEN)) {
+                String file = askFileName(FILE_EXT, FileDialog.LOAD);
+                if (file!=null) {
+                    try {
+                        if (photos.load(file)) {
+                            albumFileName = file;
+                            list.setSelectedIndex(0);
+                            list.recalculateVisibleRows();
+                            editingPhoto = null;
+                            setFrameIcon();
+                        }
+                        else
+                            JOptionPane.showMessageDialog(this, file+" is not a valid JPhoto file.");
+                    } catch (Exception e) {
+                        System.out.println("load error:"+e);
+                        JOptionPane.showMessageDialog(this, "Cannot open "+file,
+                                APP_NAME, JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            }
+            JPhoto photo = (JPhoto)photos.getElementAt(0);
+            selectPhoto(photo);
+        }
+    }
+
+    private void saveAs()
+    {
+        String file = askFileName(FILE_EXT, FileDialog.SAVE);
+        if (file!=null) {
+            try {
+                if (photos.save(file)) {
+                    albumFileName = file;
+                    setTitle();
+                }
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(this, "Cannot save as "+file,
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private void importPhotos(String cmd)
+    {
+        String files[] = null;
+        if (cmd.equals(JPhotoMenu.A_IMPORT_DIR)) {
+            String dir = Utils.getDirectory(this, photoDirectory);
+            if (dir!=null) {
+                String input[] = { dir+File.separator };
+                files = Utils.expandAllDirectories(input);
+                if (files==null || files.length==0)
+                    JOptionPane.showMessageDialog(this, "No photos in "+dir,
+                            APP_NAME, JOptionPane.ERROR_MESSAGE);
+                photoDirectory = new File(dir);
+            }
+        }
+        else {
+            files = JPhotoBrowser.getFiles(this, photoDirectory);
+            if (JPhotoBrowser.getDefaultDirectory()!=null)
+                photoDirectory = JPhotoBrowser.getDefaultDirectory();
+        }
+
+        if (files!=null) {
+            int index = list.getSelectedIndex();
+            if (index<0)
+                index = 0;
+            else
+                index++;
+
+            list.getPhotoModel().addAll(index, files);
+            list.setSelectedIndex(index-1);
+
+            Dimension dim = scrollPane.getViewport().getSize();
+            list.setVisibleBounds(dim);
+        }
+    }
+
+    private void findOriginals()
+    {
+        String files[] = null;
+        String dir = Utils.getDirectory(this, photoDirectory);
+        if (dir!=null) {
+            String input[] = { dir+File.separator };
+            files = Utils.expandAllDirectories(input);
+            if (files==null || files.length==0)
+                JOptionPane.showMessageDialog(this, "No photos in "+dir,
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+            else
+                photoDirectory = new File(dir);
+        }
+
+        if (files!=null) {
+            list.getPhotoModel().findOriginals(files);
+        }
+    }
+
+    private void asTODO(String cmd)
+    {
+        if (JPhotoStatus.inProgress()) {
+            JOptionPane.showMessageDialog(this, "Already exporting, please wait.",
+                    APP_NAME, JOptionPane.ERROR_MESSAGE);
+        }
+        else {
+            // Save the XML first, ask from the user if neccessary, then generate the html files.
+            boolean status = false;
+
+            if (askNameAndSave()) {
+                try {
+                    setTitle();
+                    if (cmd.equals(JPhotoMenu.A_EXPORT_1))
+                        status = photos.exportHtmlJari1(albumFileName);
+                    else if (cmd.equals(JPhotoMenu.A_EXPORT_2))
+                        status = photos.exportHtmlJari2(albumFileName);
+                    // else if (cmd.equals(JPhotoMenu.A_EXPORT_3))
+                    //    status = photos.exportHtmlTarja(albumFileName);
+
+                    if (status==false)
+                        JOptionPane.showMessageDialog(this, "Export of "+albumFileName+ " failed.",
+                                APP_NAME, JOptionPane.ERROR_MESSAGE);
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(this, "Cannot save "+albumFileName,
+                            APP_NAME, JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }
+    }
+
+    private void orTODO(String cmd)
+    {
+        String htmlFile = null;
+        if (askNameAndSave()) {
+            File target = new File(albumFileName).getAbsoluteFile().getParentFile();
+            statusLine.setText("Exporting Template to "+target+"...");
+            boolean status = false;
+            if (cmd.equals(JPhotoMenu.A_EXPORT_TEMPLATE_1))
+                status = photos.exportTemplateJari1(target);
+            else if (cmd.equals(JPhotoMenu.A_EXPORT_TEMPLATE_2))
+                status = photos.exportTemplateJari2(target);
+            else if (cmd.equals(JPhotoMenu.A_EXPORT_TEMPLATE_INDEX))
+                status = photos.exportTemplateJari3(target);
+                /* else if (cmd.equals(JPhotoMenu.A_EXPORT_TEMPLATE_4))
+                    status = photos.exportTemplateTarja(target);
+                */
+            if (status==false)
+                JOptionPane.showMessageDialog(this, "Export to "+target+ " failed.",
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+            else
+                statusLine.setText("Exported template(s) to "+target);
+        }
+    }
+
+    private void exportSubtitled()
+    {
+        if (askNameAndSave()) {
+            boolean status = photos.exportSubtitledPhotos(albumFileName);
+            if (status==false)
+                JOptionPane.showMessageDialog(this, "Export subtitled to "+albumFileName+ " failed.",
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void exportOriginals()
+    {
+        if (askNameAndSave()) {
+            boolean status = photos.copyOriginals(albumFileName, "originals", true);
+            if (status==false)
+                JOptionPane.showMessageDialog(this, "Copy originals to "+albumFileName+ " failed.",
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void exportIndex()
+    {
+        if (askNameAndSave()) {
+            boolean status = photos.exportHtmlJari3(albumFileName);
+            if (status==false)
+                JOptionPane.showMessageDialog(this, "Export index failed.",
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+            else
+                JOptionPane.showMessageDialog(this, "Exported index of all linked albums.",
+                        APP_NAME, JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    private void exportSlideShow1()
+    {
+        if (askNameAndSave()) {
+            String targetFile = askFileName(".jar", FileDialog.SAVE);
+            if (targetFile==null) {
+                JOptionPane.showMessageDialog(this, "File not set");
+                return;
+            }
+            boolean status = photos.exportSlideshow(targetFile, 1);
+            if (status==false)
+                JOptionPane.showMessageDialog(this, "Export of slideshow to "+albumFileName+ " failed.",
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void exportSlideShow2()
+    {
+        if (askNameAndSave()) {
+            String targetFile = askFileName(".jar", FileDialog.SAVE);
+            if (targetFile==null) {
+                JOptionPane.showMessageDialog(this, "File not set");
+                return;
+            }
+            boolean status = photos.exportSlideshow(targetFile, 2);
+            if (status==false)
+                JOptionPane.showMessageDialog(this, "Export of slideshow to "+albumFileName+ " failed.",
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void exportSlideShow3()
+    {
+        if (askNameAndSave()) {
+            String targetFile = askFileName(".jar", FileDialog.SAVE);
+            if (targetFile==null) {
+                JOptionPane.showMessageDialog(this, "File not set");
+                return;
+            }
+            boolean status = photos.exportSlideshow(targetFile, 3);
+            if (status==false)
+                JOptionPane.showMessageDialog(this, "Export of slideshow to "+albumFileName+ " failed.",
+                        APP_NAME, JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+
+    private void about()
+    {
+        JOptionPane.showMessageDialog(this, APP_NAME+" v1.4.5 - Organize and Publish Your Digital Photos.\n"+
+                        "Copyright 2005-2007 Jari Karjala [www.jpkware.com],\n"
+                        +"Tarja Hakala [www.hakalat.net]"
+                        +" and Zbynek Muï¿½ï¿½k [zbynek.muzik@email.cz]\n"
+                        +"This is free software, licenced under the GNU General Public License.",
+                JPhotoMenu.A_ABOUT, JOptionPane.INFORMATION_MESSAGE);
+    }
+
     /** ActionListener
      */
     public void actionPerformed(ActionEvent event) {
@@ -253,377 +501,268 @@ public class JPhotoFrame extends JFrame
 
         String cmd = event.getActionCommand();
         if (cmd.equals(JPhotoMenu.A_NEW) || cmd.equals(JPhotoMenu.A_OPEN)) {
-            if (confirmedSave()!=JOptionPane.CANCEL_OPTION) {
-                photos = new JPhotoCollection();
-                list.setPhotoModel(photos);
-                albumFileName = null;
-                editingPhoto = null;
-                if (cmd.equals(JPhotoMenu.A_OPEN)) {
-                    String file = askFileName(FILE_EXT, FileDialog.LOAD);
-                    if (file!=null) {
-                        try {
-                            if (photos.load(file)) {
-                                albumFileName = file;
-                                list.setSelectedIndex(0);
-                                list.recalculateVisibleRows();
-                                editingPhoto = null;
-                                setFrameIcon();
-                            }
-                            else
-                                JOptionPane.showMessageDialog(this, file+" is not a valid JPhoto file.");
-                        } catch (Exception e) {
-                            System.out.println("load error:"+e);
-                            JOptionPane.showMessageDialog(this, "Cannot open "+file,
-                                                          APP_NAME, JOptionPane.ERROR_MESSAGE);
-                        }
-                    }
-                }
-                JPhoto photo = (JPhoto)photos.getElementAt(0);
-                selectPhoto(photo);
-            }
+            //New or open
+            this.newOrOpen(cmd);
         }
         else if (cmd.equals(JPhotoMenu.A_SAVE)) {
-            askNameAndSave();
+            //Save
+            this.askNameAndSave();
         }
         else if (cmd.equals(JPhotoMenu.A_SAVEAS)) {
-            String file = askFileName(FILE_EXT, FileDialog.SAVE);
-            if (file!=null) {
-                try {
-                    if (photos.save(file)) {
-                        albumFileName = file;
-                        setTitle();
-                    }
-                } catch (Exception e) {
-                    JOptionPane.showMessageDialog(this, "Cannot save as "+file,
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-                }
-            }
+            //Save as
+            this.saveAs();
         }
-        else if (cmd.equals(JPhotoMenu.A_IMPORT_DIR)
-                 || cmd.equals(JPhotoMenu.A_IMPORT)) {
-            
-            String files[] = null;
-            if (cmd.equals(JPhotoMenu.A_IMPORT_DIR)) {
-                String dir = Utils.getDirectory(this, photoDirectory);
-                if (dir!=null) {
-                    String input[] = { dir+File.separator };
-                    files = Utils.expandAllDirectories(input);
-                    if (files==null || files.length==0)
-                        JOptionPane.showMessageDialog(this, "No photos in "+dir,
-                                                      APP_NAME, JOptionPane.ERROR_MESSAGE);
-                    photoDirectory = new File(dir);
-                }
-            }
-            else {
-                files = JPhotoBrowser.getFiles(this, photoDirectory);
-                if (JPhotoBrowser.getDefaultDirectory()!=null)
-                    photoDirectory = JPhotoBrowser.getDefaultDirectory();
-            }
-            
-            if (files!=null) {
-                int index = list.getSelectedIndex();
-                if (index<0)
-                    index = 0;
-                else
-                    index++;
-                
-                list.getPhotoModel().addAll(index, files);
-                list.setSelectedIndex(index-1);
-                
-                Dimension dim = scrollPane.getViewport().getSize();
-                list.setVisibleBounds(dim);
-            }
+        else if (cmd.equals(JPhotoMenu.A_IMPORT_DIR) || cmd.equals(JPhotoMenu.A_IMPORT)) {
+            //Import
+            this.importPhotos(cmd);
         }
-        else if (cmd.equals(JPhotoMenu.A_FIND_ORIGINALS)) {           
-            String files[] = null;
-            String dir = Utils.getDirectory(this, photoDirectory);
-            if (dir!=null) {
-                String input[] = { dir+File.separator };
-                files = Utils.expandAllDirectories(input);
-                if (files==null || files.length==0)
-                    JOptionPane.showMessageDialog(this, "No photos in "+dir,
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-                else
-                    photoDirectory = new File(dir);
-            }
-            
-            if (files!=null) {
-                list.getPhotoModel().findOriginals(files);
-            }
+        else if (cmd.equals(JPhotoMenu.A_FIND_ORIGINALS)) {
+            //Find originals
+            this.findOriginals();
         }
         else if (cmd.startsWith("as ")) {
-
-            if (JPhotoStatus.inProgress()) {
-                JOptionPane.showMessageDialog(this, "Already exporting, please wait.",
-                                              APP_NAME, JOptionPane.ERROR_MESSAGE);
-            }
-            else {
-                // Save the XML first, ask from the user if neccessary, then generate the html files.
-                boolean status = false;
-
-                if (askNameAndSave()) {
-                    try {
-                        setTitle();
-                        if (cmd.equals(JPhotoMenu.A_EXPORT_1))
-                            status = photos.exportHtmlJari1(albumFileName);
-                        else if (cmd.equals(JPhotoMenu.A_EXPORT_2))
-                            status = photos.exportHtmlJari2(albumFileName);
-                        // else if (cmd.equals(JPhotoMenu.A_EXPORT_3)) 
-                        //    status = photos.exportHtmlTarja(albumFileName);
-
-                        if (status==false)
-                            JOptionPane.showMessageDialog(this, "Export of "+albumFileName+ " failed.",
-                                                          APP_NAME, JOptionPane.ERROR_MESSAGE);
-                    } catch (Exception e) {
-                        JOptionPane.showMessageDialog(this, "Cannot save "+albumFileName,
-                                                      APP_NAME, JOptionPane.ERROR_MESSAGE);
-                    }                
-                }
-            }
+            //TODO as?
+            this.asTODO(cmd);
         }
         else if (cmd.startsWith("for ")) {
-            String htmlFile = null;
-            if (askNameAndSave()) {
-                File target = new File(albumFileName).getAbsoluteFile().getParentFile();
-                statusLine.setText("Exporting Template to "+target+"...");
-                boolean status = false;
-                if (cmd.equals(JPhotoMenu.A_EXPORT_TEMPLATE_1))
-                    status = photos.exportTemplateJari1(target);
-                else if (cmd.equals(JPhotoMenu.A_EXPORT_TEMPLATE_2))
-                    status = photos.exportTemplateJari2(target);
-                else if (cmd.equals(JPhotoMenu.A_EXPORT_TEMPLATE_INDEX))
-                    status = photos.exportTemplateJari3(target);
-                /* else if (cmd.equals(JPhotoMenu.A_EXPORT_TEMPLATE_4)) 
-                    status = photos.exportTemplateTarja(target);
-                */
-                if (status==false)
-                    JOptionPane.showMessageDialog(this, "Export to "+target+ " failed.",
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-                else
-                    statusLine.setText("Exported template(s) to "+target);
-            }
+            //TODO for?
+            this.orTODO(cmd);
         }
         else if (cmd.equals(JPhotoMenu.A_EXPORT_SUBTITLED)) {
-            if (askNameAndSave()) {
-                boolean status = photos.exportSubtitledPhotos(albumFileName);
-                if (status==false)
-                    JOptionPane.showMessageDialog(this, "Export subtitled to "+albumFileName+ " failed.",
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-            }
+            //Export subtitled
+            this.exportSubtitled();
         }
         else if (cmd.equals(JPhotoMenu.A_COPY_ORIGINALS)) {
-            if (askNameAndSave()) {
-                boolean status = photos.copyOriginals(albumFileName, "originals", true);
-                if (status==false)
-                    JOptionPane.showMessageDialog(this, "Copy originals to "+albumFileName+ " failed.",
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-            }
+            //Export originals
+            this.exportOriginals();
         }
         else if (cmd.equals(JPhotoMenu.A_EXPORT_INDEX)) {
-            if (askNameAndSave()) {
-                boolean status = photos.exportHtmlJari3(albumFileName);
-                if (status==false)
-                    JOptionPane.showMessageDialog(this, "Export index failed.",
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-                else
-                    JOptionPane.showMessageDialog(this, "Exported index of all linked albums.",
-                                                  APP_NAME, JOptionPane.INFORMATION_MESSAGE);
-            }
+            this.exportIndex();
         }
         else if (cmd.equals(JPhotoMenu.A_EXPORT_SLIDESHOW_1)) {
             // exports slideshow with max. resolution 800x600
-            if (askNameAndSave()) {
-                String targetFile = askFileName(".jar", FileDialog.SAVE);
-                if (targetFile==null) {
-                    JOptionPane.showMessageDialog(this, "File not set");
-                    return;
-                }
-                boolean status = photos.exportSlideshow(targetFile, 1);
-                if (status==false)
-                    JOptionPane.showMessageDialog(this, "Export of slideshow to "+albumFileName+ " failed.",
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-            }
+            this.exportSlideShow1();
         }
         else if (cmd.equals(JPhotoMenu.A_EXPORT_SLIDESHOW_2)) {
             // exports slideshow with max. resolution 1024x768
-            if (askNameAndSave()) {
-                String targetFile = askFileName(".jar", FileDialog.SAVE);
-                if (targetFile==null) {
-                    JOptionPane.showMessageDialog(this, "File not set");
-                    return;
-                }
-                boolean status = photos.exportSlideshow(targetFile, 2);
-                if (status==false)
-                    JOptionPane.showMessageDialog(this, "Export of slideshow to "+albumFileName+ " failed.",
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-            }
+            this.exportSlideShow2();
         }        
         else if (cmd.equals(JPhotoMenu.A_EXPORT_SLIDESHOW_3)) {
             // exports slideshow with max. resolution 1280x1024
-            if (askNameAndSave()) {
-                String targetFile = askFileName(".jar", FileDialog.SAVE);
-                if (targetFile==null) {
-                    JOptionPane.showMessageDialog(this, "File not set");
-                    return;
-                }
-                boolean status = photos.exportSlideshow(targetFile, 3);
-                if (status==false)
-                    JOptionPane.showMessageDialog(this, "Export of slideshow to "+albumFileName+ " failed.",
-                                                  APP_NAME, JOptionPane.ERROR_MESSAGE);
-            }
+            this.exportSlideShow3();
         }        
         else if (cmd.equals(JPhotoMenu.A_EXIT)) {
-            exitConfirmedSave();
+            //Exit
+            this.exitConfirmedSave();
         }
         else if (cmd.equals(JPhotoMenu.A_CUT)) {
-            int index = list.getSelectedIndex();
-            transferHandler.exportToClipboard(list, getToolkit().getSystemClipboard(),
-                                              TransferHandler.MOVE);
-            list.setSelectedIndex(index);
+            this.cut();
+
         }
         else if (cmd.equals(JPhotoMenu.A_COPY)) {
-            transferHandler.exportToClipboard(list, getToolkit().getSystemClipboard(),
-                                              TransferHandler.COPY);
+            //Copy
+            copy();
         }
         else if (cmd.equals(JPhotoMenu.A_PASTE)) {
-            transferHandler
-                .importData(list,getToolkit().getSystemClipboard().getContents(list));
+            //Paste
+            transferHandler.importData(list,getToolkit().getSystemClipboard().getContents(list));
         }
         else if (cmd.equals(JPhotoMenu.A_DELETE)) {
-            int index = list.getSelectedIndex();
-            Object selected[] = list.getSelectedValues();
-            if (list!=null)
-                for (int i=0; i<selected.length; i++) {
-                    JPhoto photo = (JPhoto)selected[i];
-                    photos.remove(photo);
-                }
-            list.setSelectedIndex(index);
+            //Delete
+            this.delete();
         }
         else if (cmd.equals(JPhotoMenu.A_INSERT)) {
-            int index = list.getSelectedIndex();
-            photos.add(index, new JPhoto(photos));
-            Dimension dim = scrollPane.getViewport().getSize();
-            list.setVisibleBounds(dim);
-            list.setSelectedIndex(index);
+            this.insert();
         }
         else if (cmd.equals(JPhotoMenu.A_INSERT_ALBUM)) {
-            String file = askFileName(FILE_EXT, FileDialog.LOAD);
-            if (file!=null) {
-                int index = list.getSelectedIndex();
-                if (index<0)
-                    index = photos.size();
-                JPhoto item = new JPhotoAlbumLink(photos, file);
-                photos.add(index, item);
-                Dimension dim = scrollPane.getViewport().getSize();
-                list.setVisibleBounds(dim);
-                list.setSelectedIndex(index);
-            }
+            this.insertAlbum();
         }
         else if (cmd.equals(JPhotoMenu.A_TITLE)) {
-            String res = JOptionPane.showInputDialog(this, "Page title",
-                                                     photos.getTitle());
-            if (res!=null)
-                photos.setTitle(res);
-            setTitle();
+            this.title();
         }
         else if (cmd.equals(JPhotoMenu.A_DESCRIPTION)) {
-            String res = JOptionPane.showInputDialog(this, "Page description",
-                                                     photos.getDescription());
-            if (res!=null)
-                photos.setDescription(res);
-            setTitle();
+            this.description();
         }
         else if (cmd.equals(JPhotoMenu.A_KEYWORDS)) {
-            String def = photos.getKeywords();
-            if (def.equals(""))
-                def = "digital photos ";
-            String res = JOptionPane.showInputDialog(this, "Keywords",
-                                                     def);
-            if (res!=null)
-                photos.setKeywords(res);
-            setTitle();
+            this.keywords();
         }
         else if (cmd.equals(JPhotoMenu.A_WATERMARK)) {
-            String def = photos.getWatermark();
-            if (def.equals(""))
-                def = "© "+Calendar.getInstance().get(Calendar.YEAR)+" ";
-            String res = JOptionPane.showInputDialog(this, "Watermark",
-                                                     def);
-            if (res!=null)
-                photos.setWatermark(res);
-            setTitle();
+            this.watermark();
         }
         else if (cmd.equals(JPhotoMenu.A_COVERPHOTO)) {
-            int index = list.getSelectedIndex();
-            if (index<0)
-                index = 0;
-            JPhoto photo = photos.get(index);
-            if (photo.getImageName()!=null) {
-                photos.setCoverPhoto(photos.get(index));
-                setFrameIcon();
-            }
-            else {
-                JOptionPane.showMessageDialog(this, "Cover photo must be a real image.",
-                                              APP_NAME, JOptionPane.ERROR_MESSAGE);
-            }
+            this.coverPhoto();
         }
         else if (cmd.equals(JPhotoMenu.A_SAVE_DEFAULTS)) {
-            prefs.put(PAGEINFO, photos.getPageInfo().marshal());
-            JOptionPane.showMessageDialog(this, "Saved current page attributes as defaults.",
-                                          APP_NAME, JOptionPane.INFORMATION_MESSAGE);
+            this.saveDefaults();
         }
         else if (cmd.equals(JPhotoMenu.A_FULLVIEW)) {
             // list.toggleFullView();
             startFullView();                
         }
         else if (cmd.equals(JPhotoMenu.A_SHOWEXIF)) {
-            showExif();
+            this.showExif();
         }
         else if (cmd.equals(JPhotoMenu.A_SLIDESHOW)) {
-            if (photos.getSize()>0) {
-                JPhotoShow show = new JPhotoShow(photos, 5000, list);
-                show.setVisible(true);
-            }
-            else
-                JOptionPane.showMessageDialog(this, "No photos to show!",
-                                              APP_NAME, JOptionPane.ERROR_MESSAGE);
-                
+            this.slideShow(A_SLIDESHOW_INTERVAL);
+
+        }
+        else if (cmd.equals(JPhotoMenu.A_FSLIDESHOW)) {
+            this.slideShow(A_FSLIDESHOW_INTERVAL);
+
         }
         else if (cmd.equals(JPhotoMenu.A_HELP)) {
             displayHelp();
         }
         else if (cmd.equals(JPhotoMenu.A_ABOUT)) {
-            JOptionPane.showMessageDialog(this, APP_NAME+" v1.4.5 - Organize and Publish Your Digital Photos.\n"+
-                                          "Copyright 2005-2007 Jari Karjala [www.jpkware.com],\n"
-                                          +"Tarja Hakala [www.hakalat.net]"
-                                          +" and Zbynek Mužík [zbynek.muzik@email.cz]\n"
-                                          +"This is free software, licenced under the GNU General Public License.",
-                                          JPhotoMenu.A_ABOUT, JOptionPane.INFORMATION_MESSAGE);
+            this.about();
         }
         else if (cmd.equals(JPhotoMenu.A_BACKGROUND)) {
-            Color color = Utils.showColorDialog(this, "Choose Background Color",
-                                                list.getBackground());
-            
-            if (color != null){
-                list.setBackground(color);
-                fullViewPanel.setBackground(color);
-                photos.setBackgroundColor(color);
-            }
+            background();
         }
         else if (cmd.equals(JPhotoMenu.A_FOREGROUND)) {
-            Color color = Utils.showColorDialog(this, "Choose Foreground Color",
-                                                list.getForeground());
-            
-            if (color != null){
-                list.setForeground(color);
-                fullViewPanel.setForeground(color);
-                photos.setForegroundColor(color);
-            }
+            foreground();
         }
         else
             System.out.println("Not implemented: "+cmd);
         
         setTitle();
+    }
+
+    private void foreground() {
+        Color color = Utils.showColorDialog(this, "Choose Foreground Color",
+                                            list.getForeground());
+
+        if (color != null){
+            list.setForeground(color);
+            fullViewPanel.setForeground(color);
+            photos.setForegroundColor(color);
+        }
+    }
+
+    private void background() {
+        Color color = Utils.showColorDialog(this, "Choose Background Color",
+                                            list.getBackground());
+
+        if (color != null){
+            list.setBackground(color);
+            fullViewPanel.setBackground(color);
+            photos.setBackgroundColor(color);
+        }
+    }
+
+    protected void slideShow(int interval) {
+        if (photos.getSize()>0) {
+            JPhotoShow show = new JPhotoShow(photos, interval, list);
+            show.setVisible(true);
+        }
+        else
+            JOptionPane.showMessageDialog(this, "No photos to show!",
+                                          APP_NAME, JOptionPane.ERROR_MESSAGE);
+    }
+
+    private void saveDefaults() {
+        prefs.put(PAGEINFO, photos.getPageInfo().marshal());
+        JOptionPane.showMessageDialog(this, "Saved current page attributes as defaults.",
+                                      APP_NAME, JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void coverPhoto() {
+        int index = list.getSelectedIndex();
+        if (index<0)
+            index = 0;
+        JPhoto photo = photos.get(index);
+        if (photo.getImageName()!=null) {
+            photos.setCoverPhoto(photos.get(index));
+            setFrameIcon();
+        }
+        else {
+            JOptionPane.showMessageDialog(this, "Cover photo must be a real image.",
+                                          APP_NAME, JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void watermark() {
+        String def = photos.getWatermark();
+        if (def.equals(""))
+            def = "ï¿½ "+ Calendar.getInstance().get(Calendar.YEAR)+" ";
+        String res = JOptionPane.showInputDialog(this, "Watermark",
+                                                 def);
+        if (res!=null)
+            photos.setWatermark(res);
+        setTitle();
+    }
+
+    private void keywords() {
+        String def = photos.getKeywords();
+        if (def.equals(""))
+            def = "digital photos ";
+        String res = JOptionPane.showInputDialog(this, "Keywords",
+                                                 def);
+        if (res!=null)
+            photos.setKeywords(res);
+        setTitle();
+    }
+
+    private void description() {
+        String res = JOptionPane.showInputDialog(this, "Page description",
+                                                 photos.getDescription());
+        if (res!=null)
+            photos.setDescription(res);
+        setTitle();
+    }
+
+    private void title() {
+        String res = JOptionPane.showInputDialog(this, "Page title",
+                                                 photos.getTitle());
+        if (res!=null)
+            photos.setTitle(res);
+        setTitle();
+    }
+
+    private void insertAlbum() {
+        String file = askFileName(FILE_EXT, FileDialog.LOAD);
+        if (file!=null) {
+            int index = list.getSelectedIndex();
+            if (index<0)
+                index = photos.size();
+            JPhoto item = new JPhotoAlbumLink(photos, file);
+            photos.add(index, item);
+            Dimension dim = scrollPane.getViewport().getSize();
+            list.setVisibleBounds(dim);
+            list.setSelectedIndex(index);
+        }
+    }
+
+    private void insert() {
+        int index = list.getSelectedIndex();
+        photos.add(index, new JPhoto(photos));
+        Dimension dim = scrollPane.getViewport().getSize();
+        list.setVisibleBounds(dim);
+        list.setSelectedIndex(index);
+    }
+
+    private void delete() {
+        int index = list.getSelectedIndex();
+        Object selected[] = list.getSelectedValues();
+        if (list!=null)
+            for (int i=0; i<selected.length; i++) {
+                JPhoto photo = (JPhoto)selected[i];
+                photos.remove(photo);
+            }
+        list.setSelectedIndex(index);
+    }
+
+    private void copy() {
+        transferHandler.exportToClipboard(list, getToolkit().getSystemClipboard(),
+                                          TransferHandler.COPY);
+    }
+
+    private void cut() {
+        //Cut
+        int index = list.getSelectedIndex();
+        transferHandler.exportToClipboard(list, getToolkit().getSystemClipboard(),
+                                          TransferHandler.MOVE);
+        list.setSelectedIndex(index);
     }
 
     public void insertPhotos(String files[]) {
